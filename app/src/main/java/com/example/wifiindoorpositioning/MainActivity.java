@@ -2,10 +2,12 @@ package com.example.wifiindoorpositioning;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.res.Configuration;
 import android.graphics.PointF;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -14,17 +16,20 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.example.wifiindoorpositioning.datatype.DistanceInfo;
 import com.example.wifiindoorpositioning.datatype.TestPoint;
 import com.example.wifiindoorpositioning.datatype.TestPointInfo;
+import com.example.wifiindoorpositioning.datatype.WifiResult;
 import com.example.wifiindoorpositioning.function.DistanceRateHighlightFunction;
 import com.example.wifiindoorpositioning.function.FirstKDistanceHighlightFunction;
 import com.example.wifiindoorpositioning.function.HighlightFunction;
 import com.example.wifiindoorpositioning.function.WeightFunction;
-import com.example.wifiindoorpositioning.manager.ApDataManager;
+import com.example.wifiindoorpositioning.manager.ApDistanceInfoManager;
 import com.example.wifiindoorpositioning.manager.ConfigManager;
 import com.example.wifiindoorpositioning.manager.SystemServiceManager;
+import com.example.wifiindoorpositioning.manager.TestPointManager;
 
 import java.util.ArrayList;
 
@@ -37,9 +42,11 @@ public class MainActivity extends AppCompatActivity {
     private Spinner debugModeSpinner, apValueModeSpinner, highlightModeSpinner, displayModeSpinner, weightModeSpinner, resultHistoriesSpinner, testPointSpinner;
     private ContentDebugView contentView;
     private HighlightButton btScan, btSettings, btCopy;
+    private HighlightButton[] pointButtons;
     private SettingsView settingsView;
 
     private TestPoint testPoint;
+    private TestPointManager testPointManager;
 
     @SuppressLint({"ClickableViewAccessibility", "SetTextI18n", "DefaultLocale"})
     @Override
@@ -47,7 +54,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         ConfigManager.createInstance(this);
-        ApDataManager.createInstance(this);
+        ApDistanceInfoManager.createInstance(this);
         SystemServiceManager.createInstance(this);
 
         setContentView(R.layout.activity_main);
@@ -73,6 +80,50 @@ public class MainActivity extends AppCompatActivity {
         contentView = findViewById(R.id.contentView);
         settingsView = new SettingsView(this);
 
+        // 新增：初始化六個按鈕
+        pointButtons = new HighlightButton[6];
+        pointButtons[0] = findViewById(R.id.btPoint1);
+        pointButtons[1] = findViewById(R.id.btPoint2);
+        pointButtons[2] = findViewById(R.id.btPoint3);
+        pointButtons[3] = findViewById(R.id.btPoint4);
+        pointButtons[4] = findViewById(R.id.btPoint5);
+        pointButtons[5] = findViewById(R.id.btPoint6);
+
+        // 新增：初始化 TestPointManager
+        testPointManager = new TestPointManager();
+        ApDistanceInfoManager.getInstance().setTestPointManager(testPointManager);
+        mapImage.setTestPointManager(testPointManager);
+
+        // 修改：設置按鈕點擊事件，將定位點平滑移動到對應的 TestPoint 座標
+        for (int i = 0; i < pointButtons.length; i++) {
+            final int index = i;
+            pointButtons[i].setOnButtonDownListener(() -> {
+                TestPoint point = testPointManager.getTestPoints().get(index);
+                // 獲取當前定位點的位置
+                PointF currentPoint = mapImage.getImagePoint();
+                float startX = currentPoint.x;
+                float startY = currentPoint.y;
+                float endX = point.coordinateX;
+                float endY = point.coordinateY;
+
+                // 使用 ValueAnimator 實現平滑移動
+                ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+                animator.setDuration(1000); // 動畫持續時間 1 秒
+                animator.addUpdateListener(animation -> {
+                    float fraction = (float) animation.getAnimatedValue();
+                    float newX = startX + (endX - startX) * fraction;
+                    float newY = startY + (endY - startY) * fraction;
+                    mapImage.setImagePoint(newX, newY);
+                    // 記錄移動路徑
+                    mapImage.addPathPoint(newX, newY);
+                });
+                animator.start();
+
+                Toast.makeText(this, "定位點正在移動到 " + (point.name != null ? point.name : "Unknown") +
+                        String.format(" (%.2f, %.2f)", point.coordinateX, point.coordinateY), Toast.LENGTH_SHORT).show();
+            });
+        }
+
         ConfigManager.getInstance().debugView = debugView;
 
         ConfigManager.getInstance().addHighlightFunction("距離排序3個", new FirstKDistanceHighlightFunction(3));
@@ -88,16 +139,7 @@ public class MainActivity extends AppCompatActivity {
 
                 sortDistances.sort(DistanceInfo.distanceComparable);
 
-//                for (int i = 0 ; i < sortDistances.size(); i++) {
-//                    if (sortDistances.get(i).rpName.equals("102"))
-//                        Log.i(sortDistances.get(i).rpName, String.valueOf(sortDistances.get(i).distance));
-//                }
-//
-//                Log.i("", distances.get(0).rpName);
-
                 if (sortDistances.size() <= 1) return sortDistances;
-
-                //System.out.printf(distances.get(0).rpName);
 
                 float[] LR = new float[sortDistances.size()];
                 int notFoundNum = sortDistances.get(0).notFoundNum;
@@ -112,7 +154,6 @@ public class MainActivity extends AppCompatActivity {
                         sortDistances.remove(i);
                     }
                 }
-
 
                 return new ArrayList<>(sortDistances.subList(0, Math.min(k, sortDistances.size())));
             }
@@ -186,8 +227,6 @@ public class MainActivity extends AppCompatActivity {
 
                 if (sortDistances.size() <= 1) return sortDistances;
 
-                //float distancetofirst = sortDistances.get(0).distance;
-
                 for (int i = sortDistances.size() - 1; i > 0; i--)  {
                     float disX = sortDistances.get(i).coordinateX - sortDistances.get(0).coordinateX;
                     float disY = sortDistances.get(i).coordinateY - sortDistances.get(0).coordinateY;
@@ -222,7 +261,6 @@ public class MainActivity extends AppCompatActivity {
 
             if (highlights.size() == 1){
                 weights.add(1f);
-
                 return weights;
             }
 
@@ -231,11 +269,8 @@ public class MainActivity extends AppCompatActivity {
             float min = Float.MAX_VALUE, max = 0;
             for (int i = 0; i < highlights.size(); i++){
                 float distance = highlights.get(i).distance;
-
                 float rate = first / distance;
-
                 totalRate += rate;
-
                 if (min > distance){
                     min = distance;
                 }
@@ -245,23 +280,17 @@ public class MainActivity extends AppCompatActivity {
             }
 
             float avgRate = totalRate / highlights.size();
-
             float multiplier =  ((max / min) - 1) / 0.4f;
-
             float total = 0;
             for (int i = 0; i < highlights.size(); i++){
                 float rate = first / highlights.get(i).distance;
-
                 total += Math.abs(avgRate - rate);
             }
 
             float baseRate = 1f / highlights.size();
-
             for (int i = 0; i < highlights.size(); i++){
                 DistanceInfo info = highlights.get(i);
-
                 float diff = avgRate - first / info.distance;
-
                 weights.add(baseRate - (Math.abs(diff) / total) * (diff > 0 ? 1 : -1) * baseRate * multiplier);
             }
 
@@ -271,37 +300,16 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public ArrayList<Float> weight(ArrayList<DistanceInfo> highlights) {
                 ArrayList<Float> weights = new ArrayList<>();
-
-                // 以下是WKNN
-                float sum = 0; // 距離倒數的總和
-                float sumOfSamplePoints_x = 0; // pi/Di
-                float sumOfSamplePoints_y = 0;
-
+                float sum = 0;
                 for (int i = 0; i < highlights.size(); i++){
                     DistanceInfo distance = highlights.get(i);
                     sum += 1/distance.distance;
-//                    weights.add()
-//                    sumOfSamplePoints_x += distance.coordinateX / distance.distance;
-//                    sumOfSamplePoints_y += distance.coordinateY / distance.distance;
-                    // predict.x += (distance.coordinateX / distance.distance) / sum;
-                    // predict.y += (distance.coordinateY / distance.distance) / sum;
                 }
-
                 for (int i = 0; i < highlights.size(); i++){
                     DistanceInfo distance = highlights.get(i);
                     float weight = 1/distance.distance / sum;
                     weights.add(weight);
-//                    sumOfSamplePoints_x += distance.coordinateX / distance.distance;
-//                    sumOfSamplePoints_y += distance.coordinateY / distance.distance;
-                    // predict.x += (distance.coordinateX / distance.distance) / sum;
-                    // predict.y += (distance.coordinateY / distance.distance) / sum;
                 }
-
-//                predict.x = sumOfSamplePoints_x / sum;
-//                predict.y = sumOfSamplePoints_y / sum;
-//
-//                // 回傳預測的座標
-//                return predict;
                 return weights;
             }
         });
@@ -309,35 +317,26 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public ArrayList<Float> weight(ArrayList<DistanceInfo> highlights) {
                 ArrayList<Float> weights = new ArrayList<>();
-
                 if (highlights.size() == 1){
                     weights.add(1f);
-
                     return weights;
                 }
-
-                // new WKNN
-                float distance_sum = 0; // 距離差總和
-                float threshold = 0; // 距離最遠的AP
-
-                // 找出哪個AP距離最遠
+                float distance_sum = 0;
+                float threshold = 0;
                 for(int i = 0; i < highlights.size(); i++){
                     if(highlights.get(i).distance > threshold){
                         threshold = highlights.get(i).distance;
                     }
                 }
-
                 for (int i = 0; i < highlights.size(); i++){
                     DistanceInfo distance = highlights.get(i);
                     distance_sum += (threshold - distance.distance);
                 }
-
                 for (int i = 0; i < highlights.size(); i++){
                     DistanceInfo distance = highlights.get(i);
                     float weight = (threshold - distance.distance) / distance_sum;
                     weights.add(weight);
                 }
-
                 return weights;
             }
         });
@@ -356,7 +355,9 @@ public class MainActivity extends AppCompatActivity {
                 float diffY = y - testPoint.coordinateY;
 
                 txtDistance.setText(String.format("%.2f, %s\n(%.2f, %.2f)",
-                        Math.sqrt(diffX * diffX + diffY * diffY), testPoint.name, testPoint.coordinateX, testPoint.coordinateY));
+                        Math.sqrt(diffX * diffX + diffY * diffY),
+                        testPoint.name != null ? testPoint.name : "Unknown",
+                        testPoint.coordinateX, testPoint.coordinateY));
             }
         });
         mapImage.setOnFingerPointChangedListener(new ZoomableImageView.OnFingerPointChangedListener() {
@@ -371,7 +372,9 @@ public class MainActivity extends AppCompatActivity {
                 contentView.setTestPoint(x, y);
 
                 txtDistance.setText(String.format("%.2f, %s\n(%.2f, %.2f)",
-                        Math.sqrt(diffX * diffX + diffY * diffY), contentView.getTestPoint().name, x, y));
+                        Math.sqrt(diffX * diffX + diffY * diffY),
+                        contentView.getTestPoint().name != null ? contentView.getTestPoint().name : "Unknown",
+                        x, y));
             }
         });
 
@@ -381,7 +384,11 @@ public class MainActivity extends AppCompatActivity {
                 switch (code) {
                     case SystemServiceManager.CODE_SUCCESS:
                         txtStatus.setText("成功");
-                        ApDataManager.getInstance().setResult(results);
+                        Log.d("MainActivity", "Scan results type: " + (results != null ? results.getClass().getName() : "null"));
+                        String wifiResultsString = wifiResultsToString((ArrayList<WifiResult>) results);
+                        ApDistanceInfoManager.getInstance().setResultFromString(wifiResultsString);
+                        ApDistanceInfoManager.Coordinate position = ApDistanceInfoManager.getInstance().calculatePosition();
+                        txtStatus.setText(String.format("掃描結果: (%.2f, %.2f)", position.x, position.y));
                         break;
                     case SystemServiceManager.CODE_NO_LOCATION:
                         txtStatus.setText("未開啟位置");
@@ -399,13 +406,10 @@ public class MainActivity extends AppCompatActivity {
             });
         });
         btSettings.setOnButtonDownListener(() -> settingsView.showView(this));
-        // setConfiguration();
         setDebugView();
         ConfigManager.getInstance().registerOnConfigChangedListener(this::setDebugView);
 
         testPoint = ConfigManager.getInstance().getTestPointAtIndex(0);
-
-        // if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) return;
 
         apValueModeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ConfigManager.getInstance().apValues));
         highlightModeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ConfigManager.getInstance().getAllHighlightFunctionNames()));
@@ -414,189 +418,180 @@ public class MainActivity extends AppCompatActivity {
         testPointSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ConfigManager.getInstance().getAllTestPointNames()));
         resultHistoriesSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, ConfigManager.getInstance().getResultHistoriesName()));
 
-        highlightModeSpinner.setSelection(ApDataManager.getInstance().getCurrentHighlightFunctionIndex());
-        displayModeSpinner.setSelection(ApDataManager.getInstance().getCurrentDisplayFunctionIndex());
-        weightModeSpinner.setSelection(ApDataManager.getInstance().getCurrentWeightFunctionIndex());
+        highlightModeSpinner.setSelection(ApDistanceInfoManager.getInstance().getCurrentHighlightFunctionIndex());
+        displayModeSpinner.setSelection(ApDistanceInfoManager.getInstance().getCurrentDisplayFunctionIndex());
+        weightModeSpinner.setSelection(ApDistanceInfoManager.getInstance().getCurrentWeightFunctionIndex());
 
         apValueModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                ApDataManager.getInstance().loadApValueAtIndex(apValueModeSpinner.getSelectedItemPosition());
-
-                txtMethodName.setText(ApDataManager.getInstance().getCurrentMethodName());
+                ApDistanceInfoManager.getInstance().loadApValueAtIndex(apValueModeSpinner.getSelectedItemPosition());
+                txtMethodName.setText(ApDistanceInfoManager.getInstance().getCurrentMethodName());
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
         highlightModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                ApDataManager.getInstance().setHighlightFunction(highlightModeSpinner.getSelectedItem().toString());
-
-                txtMethodName.setText(ApDataManager.getInstance().getCurrentMethodName());
+                ApDistanceInfoManager.getInstance().setHighlightFunction(highlightModeSpinner.getSelectedItem().toString());
+                txtMethodName.setText(ApDistanceInfoManager.getInstance().getCurrentMethodName());
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
         displayModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                ApDataManager.getInstance().setDisplayFunction(displayModeSpinner.getSelectedItem().toString());
+                ApDistanceInfoManager.getInstance().setDisplayFunction(displayModeSpinner.getSelectedItem().toString());
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
         weightModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                ApDataManager.getInstance().setWeightFunction(weightModeSpinner.getSelectedItem().toString());
-
-                txtMethodName.setText(ApDataManager.getInstance().getCurrentMethodName());
+                ApDistanceInfoManager.getInstance().setWeightFunction(weightModeSpinner.getSelectedItem().toString());
+                txtMethodName.setText(ApDistanceInfoManager.getInstance().getCurrentMethodName());
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
         resultHistoriesSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
                 TestPointInfo testPointInfo = ConfigManager.getInstance().getResultHistory(i);
-
                 testPointSpinner.setSelection(ConfigManager.getInstance().getTestPointIndex(testPointInfo.testPoint.name));
-
-                ApDataManager.getInstance().setResult(testPointInfo.results);
+                Log.d("MainActivity", "testPointInfo.results type: " + (testPointInfo.results != null ? testPointInfo.results.getClass().getName() : "null"));
+                String resultsString = wifiResultsToString(testPointInfo.results);
+                ApDistanceInfoManager.getInstance().setResultFromString(resultsString);
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
         testPointSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
                 testPoint = ConfigManager.getInstance().getTestPointAtIndex(i);
-
                 PointF p = mapImage.getImagePoint();
                 float diffX = testPoint.coordinateX - p.x;
                 float diffY = testPoint.coordinateY - p.y;
-
                 mapImage.setFingerPoint(testPoint.coordinateX, testPoint.coordinateY);
-
                 contentView.setTestPoint(testPoint);
-
                 txtDistance.setText(String.format("%.2f, %s\n(%.2f, %.2f)",
-                        Math.sqrt(diffX * diffX + diffY * diffY), testPoint.name, testPoint.coordinateX, testPoint.coordinateY));
+                        Math.sqrt(diffX * diffX + diffY * diffY),
+                        testPoint.name != null ? testPoint.name : "Unknown",
+                        testPoint.coordinateX, testPoint.coordinateY));
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
 
         contentView.setMainActivity(this);
 
-        btCopy.setOnButtonDownListener(() -> SystemServiceManager.getInstance().toClipBoard(ApDataManager.getInstance().originalResults));
+        btCopy.setOnButtonDownListener(() -> {
+            ArrayList<WifiResult> results = ApDistanceInfoManager.getInstance().originalResults;
+            StringBuilder sb = new StringBuilder();
+            for (WifiResult result : results) {
+                sb.append("Level: ").append(String.valueOf(result.level))
+                        .append(", RP Level: ").append(String.valueOf(result.rpLevel)).append("\n");
+            }
+            SystemServiceManager.getInstance().toClipBoard(sb.toString());
+        });
 
         debugModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
                 String mode = debugModeSpinner.getSelectedItem().toString();
-
                 contentView.setMode(mode);
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
-
             }
         });
     }
 
-    private void setConfiguration(){
-        txtMethodName.setText(ApDataManager.getInstance().getCurrentMethodName());
-
-        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE){
-            System.out.println("vis");
+    private String wifiResultsToString(ArrayList<WifiResult> wifiResults) {
+        if (wifiResults == null || wifiResults.isEmpty()) {
+            return "";
         }
-        else{
+        StringBuilder sb = new StringBuilder();
+        for (WifiResult result : wifiResults) {
+            sb.append(result.level).append(",").append(result.rpLevel).append(";");
+        }
+        if (sb.length() > 0) {
+            sb.setLength(sb.length() - 1);
+        }
+        return sb.toString();
+    }
+
+    private void setConfiguration() {
+        txtMethodName.setText(ApDistanceInfoManager.getInstance().getCurrentMethodName());
+        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            System.out.println("vis");
+        } else {
             ViewGroup parent = (ViewGroup) txtMethodName.getParent();
             if (parent != null)
                 parent.removeView(txtMethodName);
-
             rootView.addView(txtMethodName);
         }
     }
 
-    private void setDebugView(){
-        if (ConfigManager.getInstance().isDebugMode && getResources().getConfiguration().orientation != Configuration.ORIENTATION_LANDSCAPE){
+    private void setDebugView() {
+        if (ConfigManager.getInstance().isDebugMode && getResources().getConfiguration().orientation != Configuration.ORIENTATION_LANDSCAPE) {
             ViewGroup parent = (ViewGroup) debugView.getParent();
             if (parent != null)
                 parent.removeView(debugView);
             rootView.addView(debugView);
-
-//            if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT)
-//                txtMethodName.setVisibility(View.GONE);
-        }
-        else{
+        } else {
             rootView.removeView(debugView);
-
-            // txtMethodName.setVisibility(View.VISIBLE);
         }
     }
 
-    public void setApValueFunctions(String apValueName, String highlightFunctionName, String weightFunctionName){
+    public void setApValueFunctions(String apValueName, String highlightFunctionName, String weightFunctionName) {
         apValueModeSpinner.setSelection(ConfigManager.getInstance().getApValueIndex(apValueName));
         highlightModeSpinner.setSelection(ConfigManager.getInstance().getHighlightFunctionIndex(highlightFunctionName));
         weightModeSpinner.setSelection(ConfigManager.getInstance().getWeightFunctionIndex(weightFunctionName));
     }
 
-    //region Sensor相關
-    public String getDirection(float degree){
+    public String getDirection(float degree) {
         float range = Math.abs(degree);
-        if (range < 22.5){
+        if (range < 22.5) {
             return "N";
+        } else if (range < 67.5) {
+            return (degree < 0) ? "NW" : "NE";
+        } else if (range < 112.5) {
+            return (degree < 0) ? "W" : "E";
+        } else if (range < 135) {
+            return (degree < 0) ? "W" : "E";
+        } else if (range < 157.5) {
+            return (degree < 0) ? "SW" : "SE";
         }
-        else if (range < 67.5){
-            return  (degree < 0) ? "NW" : "NE";
-        }
-        else if (range < 112.5){
-            return  (degree < 0) ? "W" : "E";
-        }
-        else if (range < 135){
-            return  (degree < 0) ? "W" : "E";
-        }
-        else if (range < 157.5){
-            return  (degree < 0) ? "SW" : "SE";
-        }
-
         return "S";
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
         SystemServiceManager.getInstance().registerSensor();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-
         SystemServiceManager.getInstance().unregisterSensor();
     }
-    //endregion
 }

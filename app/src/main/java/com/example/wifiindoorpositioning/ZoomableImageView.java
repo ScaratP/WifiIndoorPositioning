@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PointF;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
@@ -24,8 +25,10 @@ import androidx.annotation.Nullable;
 
 import com.example.wifiindoorpositioning.datatype.DistanceInfo;
 import com.example.wifiindoorpositioning.datatype.ReferencePoint;
-import com.example.wifiindoorpositioning.manager.ApDataManager;
+import com.example.wifiindoorpositioning.datatype.TestPoint;
+import com.example.wifiindoorpositioning.manager.ApDistanceInfoManager;
 import com.example.wifiindoorpositioning.manager.ConfigManager;
+import com.example.wifiindoorpositioning.manager.TestPointManager;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,10 +39,14 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
     private ScrollView scrollView;
     private final Matrix matrix;
     private Paint circlePaint, arcPaint, pointsPaint, testPointsPaint, highlightPaint, fingerPaint;
+    private Paint testPointPaint, originPaint;
+    private Paint pathPaint; // 新增：用於繪製路徑的 Paint
     private Mode mode;
     private final PointF imagePoint = new PointF(100, 100);
     private final PointF fingerPoint = new PointF(2854, 1407);
     private float lookAngle = 0, northOffset = 0;
+    private TestPointManager testPointManager;
+    private List<PointF> pathPoints = new ArrayList<>(); // 新增：記錄移動路徑的點
 
     public ZoomableImageView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
@@ -53,13 +60,18 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
 
         if (isInEditMode()) return;
 
-        ApDataManager.getInstance().registerOnResultChangedListener(new ApDataManager.OnResultChangedListener() {
+        ApDistanceInfoManager.getInstance().registerOnResultChangedListener(new ApDistanceInfoManager.OnResultChangedListener() {
             @Override
             public void resultChanged(int code) {
-                ApDataManager.Coordinate c = ApDataManager.getPredictCoordinate(ApDataManager.getInstance().highlightDistances);
+                ApDistanceInfoManager.Coordinate c = ApDistanceInfoManager.getPredictCoordinate(ApDistanceInfoManager.getInstance().highlightDistances);
                 setImagePoint(c.x, c.y);
             }
         });
+    }
+
+    public void setTestPointManager(TestPointManager manager) {
+        this.testPointManager = manager;
+        postInvalidate();
     }
 
     public void screenPointToImagePoint(PointF p, float pointX, float pointY){
@@ -103,14 +115,17 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
 
         postInvalidate();
     }
-    public void setImagePoint(ApDataManager.Coordinate c){
+
+    public void setImagePoint(ApDistanceInfoManager.Coordinate c){
         setImagePoint(c.x, c.y);
     }
+
     public void setLookAngle(float angle){
         lookAngle = angle;
 
         postInvalidate();
     }
+
     public void setNorthOffset(float offsetAngle){
         northOffset = offsetAngle;
 
@@ -124,12 +139,13 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
     public void setFingerPoint(float x, float y){
         fingerPoint.set(x, y);
 
-//        if (fingerPointChangedListener != null){
-//            fingerPointChangedListener.pointChange(fingerPoint.x, fingerPoint.y);
-//        }
+        if (fingerPointChangedListener != null){
+            fingerPointChangedListener.pointChange(fingerPoint.x, fingerPoint.y);
+        }
 
         postInvalidate();
     }
+
     private void setFingerPointWithScreenPoint(float x, float y){
         screenPointToImagePoint(fingerPoint, x, y);
 
@@ -139,8 +155,22 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
 
         postInvalidate();
     }
+
+    // 新增：記錄移動路徑的點
+    public void addPathPoint(float x, float y) {
+        pathPoints.add(new PointF(x, y));
+        postInvalidate();
+    }
+
+    // 新增：清空路徑（可選）
+    public void clearPath() {
+        pathPoints.clear();
+        postInvalidate();
+    }
+
     private final static float arcRadius = 200;
     private RadialGradient gradient;
+
     private void canvasSettings(){
         setBackgroundColor(Color.valueOf(0.8f, 0.8f, 0.8f, 0.3f).toArgb());
 
@@ -166,6 +196,21 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
         fingerPaint = new Paint();
         fingerPaint.setColor(Color.BLACK);
         fingerPaint.setStyle(Paint.Style.FILL);
+
+        testPointPaint = new Paint();
+        testPointPaint.setColor(Color.BLUE);
+        testPointPaint.setStyle(Paint.Style.FILL);
+
+        originPaint = new Paint();
+        originPaint.setColor(Color.RED);
+        originPaint.setStyle(Paint.Style.FILL);
+
+        // 新增：初始化路徑繪製的 Paint
+        pathPaint = new Paint();
+        pathPaint.setColor(Color.YELLOW); // 路徑顏色設為黃色
+        pathPaint.setStyle(Paint.Style.STROKE);
+        pathPaint.setStrokeWidth(5); // 路徑線條寬度
+        pathPaint.setAntiAlias(true);
     }
 
     public float density, imageWidth, imageHeight, coordinateDensityScalar;
@@ -249,7 +294,6 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
                         break;
                     case MotionEvent.ACTION_MOVE:
                         if (mode == Mode.Drag) {
-                            // 如果停留時間過短，判定為點擊而非移動則跳過
                             if (Calendar.getInstance().getTimeInMillis() - time > 100) {
                                 float x = event.getX() - lastPointX;
                                 float y = event.getY() - lastPointY;
@@ -303,10 +347,6 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
                             float newDis = distance(event);
 
                             float scale = newDis / dis;
-
-//                            if (changeMatrixValues[0] * scale < minScale * 0.9f){
-//                                scale = minScale * 0.9f / changeMatrixValues[0];
-//                            }
 
                             matrix.set(changeMatrix);
                             matrix.postScale(scale, scale, midX, midY);
@@ -374,14 +414,14 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
         matrix.getValues(values);
 
         ConfigManager configManager = ConfigManager.getInstance();
-        ApDataManager apDataManager = ApDataManager.getInstance();
+        ApDistanceInfoManager apDistanceInfoManager = ApDistanceInfoManager.getInstance();
 
         float scaleX = 1f;
         float scaleY = 1f;
 
-        ArrayList<ApDataManager.ProtoCluster> pointsCluster = apDataManager.signalClusters;
-        ArrayList<DistanceInfo> distances = ApDataManager.getInstance().originalDistances;
-        ArrayList<DistanceInfo> highlights = ApDataManager.getInstance().highlightDistances;
+        ArrayList<ApDistanceInfoManager.ProtoCluster> pointsCluster = apDistanceInfoManager.signalClusters;
+        ArrayList<DistanceInfo> distances = ApDistanceInfoManager.getInstance().originalDistances;
+        ArrayList<DistanceInfo> highlights = ApDistanceInfoManager.getInstance().highlightDistances;
 
         float pointRadius = configManager.referencePointRadius * coordinateDensityScalar * values[0];
         if (configManager.isDebugMode){
@@ -442,6 +482,21 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
             }
         }
 
+        // 新增：繪製移動路徑
+        if (pathPoints.size() > 1) {
+            Path path = new Path();
+            for (int i = 0; i < pathPoints.size(); i++) {
+                float pathX = pathPoints.get(i).x * scaleX * coordinateDensityScalar * values[0] + values[2];
+                float pathY = pathPoints.get(i).y * scaleY * coordinateDensityScalar * values[4] + values[5];
+                if (i == 0) {
+                    path.moveTo(pathX, pathY);
+                } else {
+                    path.lineTo(pathX, pathY);
+                }
+            }
+            canvas.drawPath(path, pathPaint);
+        }
+
         float x = imagePoint.x * scaleX * coordinateDensityScalar * values[0] + values[2];
         float y = imagePoint.y * scaleY * coordinateDensityScalar * values[4] + values[5];
 
@@ -459,9 +514,21 @@ public class ZoomableImageView extends androidx.appcompat.widget.AppCompatImageV
             float fingerY = fingerPoint.y * scaleY * coordinateDensityScalar * values[4] + values[5];
 
             canvas.drawCircle(fingerX, fingerY, configManager.actualPointRadius * coordinateDensityScalar * values[0], fingerPaint);
+
+            if (testPointManager != null) {
+                for (TestPoint point : testPointManager.getTestPoints()) {
+                    float testPointX = point.coordinateX * scaleX * coordinateDensityScalar * values[0] + values[2];
+                    float testPointY = point.coordinateY * scaleY * coordinateDensityScalar * values[4] + values[5];
+                    canvas.drawCircle(testPointX, testPointY, configManager.actualPointRadius * coordinateDensityScalar * values[0], testPointPaint);
+                }
+
+                TestPoint origin = testPointManager.getCurrentOrigin();
+                float originX = origin.coordinateX * scaleX * coordinateDensityScalar * values[0] + values[2];
+                float originY = origin.coordinateY * scaleY * coordinateDensityScalar * values[4] + values[5];
+                canvas.drawCircle(originX, originY, configManager.predictPointRadius * coordinateDensityScalar * values[0], originPaint);
+            }
         }
     }
-
 
     public enum Mode {
         None, Drag, Zoom

@@ -229,8 +229,12 @@ public class ApDataManager {
 
                 setHighlightWeights(highlights, weights);
 
-                apDistances.add(new ApDistanceInfo(apValueName, highlightName, weightName,
-                        getCoordinateWithValues(apValueName, highlightFunctions.get(highlightName), weightFunctions.get(weightName))));
+                // 修正：將 Coordinate 分解為 x 和 y，並提供 distance
+                Coordinate coordinate = getCoordinateWithValues(apValueName, highlightFunctions.get(highlightName), weightFunctions.get(weightName));
+                float x = coordinate.x;
+                float y = coordinate.y;
+                float distance = 0; // distance 應根據實際需求計算，這裡設為 0
+                apDistances.add(new ApDistanceInfo(apValueName, highlightName, weightName, x, y, distance));
             }
         }
 
@@ -244,20 +248,6 @@ public class ApDataManager {
 
         ConfigManager configManager = ConfigManager.getInstance();
         ArrayList<String> apValueNames = configManager.getAllEnableApValueNames();
-
-//        HashMap<String, HighlightFunction> highlightFunctions = configManager.highlightFunctions;
-//        HashMap<String, WeightFunction> weightFunctions = configManager.weightFunctions;
-//        ArrayList<String> highlightNames = configManager.getAllEnableHighlightFunctionNames();
-//        ArrayList<String> weightNames = configManager.getAllEnableWeightFunctionNames();
-//
-//        for (String apValueName : apValueNames){
-//            for (String highlightName : highlightNames){
-//                for (String weightName : weightNames){
-//                    apDistances.add(new ApDistanceInfo(apValueName, highlightName, weightName,
-//                            getCoordinateWithValues(apValueName, highlightFunctions.get(highlightName), weightFunctions.get(weightName))));
-//                }
-//            }
-//        }
 
         for (String apValueName : apValueNames){
             apDistances.addAll(getCoordinateWithValues(apValueName));
@@ -475,7 +465,6 @@ public class ApDataManager {
             int positionClusterIndex = labels.get(signalClusterIndex);
             int rpIndex = rng.nextInt(positionCluster.get(positionClusterIndex).size());
 
-
             ReferencePoint rp = positionCluster.get(positionClusterIndex).get(rpIndex);
             ArrayList<Float> vector = rp.vector;
 
@@ -561,8 +550,6 @@ public class ApDataManager {
     }
 
     public static ArrayList<ReferencePoint> getNearestClusterRps(ArrayList<ProtoCluster> signalCluster, ArrayList<Float> ssids){
-//        float minDis = Float.MAX_VALUE;
-//        int minClusterIndex = 0;
         IntFloatPair[] distances = new IntFloatPair[signalCluster.size()];
         for (int i = 0; i < signalCluster.size(); i++){
             ArrayList<Float> protoVector = signalCluster.get(i).vector;
@@ -584,11 +571,6 @@ public class ApDataManager {
                 System.out.print(rps.get(j).name + " ");
             }
             System.out.println();
-
-//            if (minDis > dis){
-//                minDis = dis;
-//                minClusterIndex = i;
-//            }
         }
 
         Arrays.sort(distances, (intFloatPair, t1) -> Float.compare(intFloatPair.floatVal, t1.floatVal));
@@ -605,7 +587,6 @@ public class ApDataManager {
         }
 
         return rps;
-        // return signalCluster.get(minClusterIndex).rps;
     }
 
     private static class IntFloatPair{
@@ -633,7 +614,6 @@ public class ApDataManager {
 
             if (r == null)
                 r = new WifiResult(apName, -100);
-//test
             output.add(r);
         }
 
@@ -699,25 +679,21 @@ public class ApDataManager {
     public void calculateResult(int changeCode){
         if (originalResults == null) return;
 
-        //new Thread(() ->{
-            this.results = getSelectedApResults(originalResults, accessPoints);
+        this.results = getSelectedApResults(originalResults, accessPoints);
 
-            positionClusters = getCoordinateClustering(fingerprint);
+        positionClusters = getCoordinateClustering(fingerprint);
 
-            signalClusters = getSignalClustering(fingerprint, positionClusters);
+        signalClusters = getSignalClustering(fingerprint, positionClusters);
 
-            ArrayList<Float> ssids = getVector(results, accessPoints);
+        ArrayList<Float> ssids = getVector(results, accessPoints);
 
-            ArrayList<ReferencePoint> nearestRps = getNearestClusterRps(signalClusters, ssids);
+        ArrayList<ReferencePoint> nearestRps = getNearestClusterRps(signalClusters, ssids);
 
-            ArrayList<DistanceInfo> distances = getDistances(nearestRps, ssids);
+        ArrayList<DistanceInfo> distances = getDistances(nearestRps, ssids);
 
-            this.originalDistances = new ArrayList<>(distances);
+        this.originalDistances = new ArrayList<>(distances);
 
-            //activity.runOnUiThread(() ->{
-                refresh(changeCode);
-            //});
-        //}).start();
+        refresh(changeCode);
     }
 
     public void setResult(ArrayList<WifiResult> results){
@@ -775,7 +751,6 @@ public class ApDataManager {
             predict.y += info.weight * info.coordinateY;
         }
 
-        // 回傳預測的座標
         return predict;
     }
 
@@ -855,7 +830,6 @@ public class ApDataManager {
         refresh(WEIGHT_FUNCTION_CHANGED);
     }
 
-
     public String getCurrentMethodName(){
         return String.format("%s/%s/%s", apValuesName, highlightFunctionName, weightFunctionName);
     }
@@ -895,4 +869,3 @@ public class ApDataManager {
         }
     }
 }
-
